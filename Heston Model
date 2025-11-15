@@ -1,0 +1,156 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+from scipy.stats import norm
+import matplotlib.cm as cm
+
+
+
+
+# Define parameters
+F0 = 2855.5     # initial futures price (instead of spot)
+r = 0.038       # risk-free rate
+T = 0.1123      # time to maturity
+kappa = 4       # mean reversion speed
+theta = 0.05    # long-run variance
+sigma = 0.35    # vol of vol
+rho = -0.2      # correlation between price and volatility
+V0 = 0.0310     # initial variance (implied vol squared)
+K = 2950        # strike price
+N = 1000        # number of simulation paths
+M = 500         # number of time steps
+dt = T / M      # time step size
+
+
+# Heston Model
+def heston_futures(F0, V0, kappa, theta, sigma, rho, r, T, M, N, K):
+   # Initialize arrays
+   F = np.zeros((M + 1, N))
+   V = np.zeros((M + 1, N))
+   F[0, :] = F0
+   V[0, :] = V0
+
+
+   # generate correlated Brownian motions
+   z1 = np.random.normal(size=(M, N))
+   z2 = rho * z1 + np.sqrt(1 - rho ** 2) * np.random.normal(size=(M, N))
+
+
+   # generate futures price and volatility paths
+   for t in range(1, M + 1):
+       # no drift term under futures measure
+       drift = 0.0
+       vol = np.sqrt(V[t - 1, :])
+
+
+       # update futures price and volatility
+       F[t, :] = F[t - 1, :] * np.exp((drift - 0.5 * vol**2) * dt + vol * np.sqrt(dt) * z1[t - 1, :])
+       V[t, :] = np.maximum(
+           0.0,
+           V[t - 1, :] + kappa * (theta - V[t - 1, :]) * dt
+           + sigma * np.sqrt(V[t - 1, :]) * np.sqrt(dt) * z2[t - 1, :]
+       )
+
+
+   # option payoff at maturity
+   payoff = np.maximum(F[-1, :] - K, 0)
+
+
+   # regression for early exercise (LSM)
+   for t in range(M - 1, 0, -1):
+       # cash flows and exercise values
+       cash_flows = np.zeros(N)
+       exercise_values = np.zeros(N)
+       for i in range(N):
+           if payoff[i] > 0:
+               cash_flows[i] = payoff[i] * np.exp(-r * (T - t) / (M - t))
+               exercise_values[i] = payoff[i]
+
+
+       # continuation values
+       x = np.log(F[t, :] / K)
+       y = np.sqrt(V[t, :])
+       X = np.column_stack((np.ones(N), x, x ** 2, x ** 3, x ** 4))
+       X_inv = np.linalg.inv(np.dot(X.T, X))
+       beta = np.dot(X_inv, np.dot(X.T, cash_flows))
+       continuation_values = np.dot(X, beta)
+
+
+       # optimal exercise policy
+       early_exercise = exercise_values > continuation_values
+       payoff[early_exercise] = exercise_values[early_exercise]
+
+
+   # option value using Monte Carlo simulation
+   discount_factor = np.exp(-r * T)
+   option_value = discount_factor * np.mean(payoff)
+
+
+   return option_value
+
+
+option_value = heston_futures(F0, V0, kappa, theta, sigma, rho, r, T, M, N, K)
+print("Option value (American Call on Futures, Heston model):", option_value)
+
+
+
+
+# 3D Plot
+fig = plt.figure(figsize=(10, 7))
+fig.patch.set_facecolor('#0e1117')  
+
+
+ax = fig.add_subplot(111, projection="3d")
+ax.set_facecolor('#111111')        
+
+
+# plot futures paths
+for i in range(10):
+   ax.plot(
+       np.arange(M + 1),
+       F[:, i],
+       V[:, i],
+       color=cm.inferno(i / 10),    
+       linewidth=1.8,
+       alpha=0.9
+   )
+
+
+# labels
+ax.set_title("Heston Model Paths", color='white', pad=20)
+ax.set_xlabel("Time Step", color='white', labelpad=10)
+ax.set_ylabel("Futures Price", color='white', labelpad=10)
+ax.set_zlabel("Variance", color='white', labelpad=10)
+ax.tick_params(colors='white')
+
+
+# rotate plot
+ax.view_init(elev=15, azim=80)
+
+
+# grid lines
+ax.xaxis._axinfo["grid"].update(color="#444444")
+ax.yaxis._axinfo["grid"].update(color="#444444")
+ax.zaxis._axinfo["grid"].update(color="#444444")
+
+
+plt.show()
+
+
+
+
+# Print simulation info
+print("\nParameters:")
+print("F0 =", F0)
+print("r =", r)
+print("T =", T)
+print("kappa =", kappa)
+print("theta =", theta)
+print("sigma =", sigma)
+print("rho =", rho)
+print("V0 =", V0)
+print("K =", K)
+print("N =", N)
+print("M =", M)
+print("dt =", dt)
+print("Option value =", round(option_value, 4))
