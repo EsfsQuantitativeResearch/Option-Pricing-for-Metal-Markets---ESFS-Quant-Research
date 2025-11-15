@@ -1,0 +1,101 @@
+import numpy as np
+from scipy.stats import norm
+
+
+# Parameters
+F0 = 2855.5      # Initial futures price
+K = 2950         # Strike price
+r = 0.038        # Risk-free rate
+sigma = 0.1763   # Volatility
+T = 0.1123       # Time to maturity (years)
+M = 500          # Time steps
+N = 1000         # Simulation paths
+dt = T / M       # Time increment
+
+
+
+
+# Black 76 Closed Form
+def black_76_price(F, K, r, sigma, tau, option_type='call'):
+  
+   if tau <= 0:
+       if option_type == 'call':
+           return np.maximum(F - K, 0)
+       else:
+           return np.maximum(K - F, 0)
+  
+   d1 = (np.log(F / K) + 0.5 * sigma**2 * tau) / (sigma * np.sqrt(tau))
+   d2 = d1 - sigma * np.sqrt(tau)
+  
+   if option_type == 'call':
+       return np.exp(-r * tau) * (F * norm.cdf(d1) - K * norm.cdf(d2))
+   else:
+       return np.exp(-r * tau) * (K * norm.cdf(-d2) - F * norm.cdf(-d1))
+
+
+
+
+def american_option_on_futures_LSM(F0, K, r, sigma, T, M, N, option_type='call'):
+  
+   # simulate futures paths with zero drift
+   F = np.zeros((M + 1, N))
+   F[0, :] = F0
+   z = np.random.normal(size=(M, N))
+   for t in range(1, M + 1):
+       F[t, :] = F[t - 1, :] * np.exp(-0.5 * sigma**2 * dt + sigma * np.sqrt(dt) * z[t - 1, :])
+
+
+   # payoff at maturity
+   if option_type == 'call':
+       payoff = np.maximum(F[-1, :] - K, 0)
+   else:
+       payoff = np.maximum(K - F[-1, :], 0)
+
+
+   # Least Squares Monte Carlo method to determine early exercise values
+   for t in range(M - 1, 0, -1):
+       tau = (M - t) * dt  # remaining time to maturity
+       discounted_cashflows = np.exp(-r * dt) * payoff
+
+
+       # Intrinsic value (early exercise value)
+       if option_type == 'call':
+           exercise_value = np.maximum(F[t, :] - K, 0)
+       else:
+           exercise_value = np.maximum(K - F[t, :], 0)
+
+
+       # In-the-money paths
+       itm = np.where(exercise_value > 0)[0]
+       if len(itm) > 5:
+           # Black–76 price estimate as variable to see ITM paths
+           continuation_est = black_76_price(F[t, itm], K, r, sigma, tau, option_type)
+
+
+           # Polynomial regression to approximate continuation value
+           X = np.column_stack((np.ones(len(itm)), continuation_est, continuation_est ** 2))
+           beta = np.linalg.lstsq(X, discounted_cashflows[itm], rcond=None)[0]
+           continuation_values = np.dot(X, beta)
+
+
+           # Optimal exercise decision
+           early_exercise = exercise_value[itm] > continuation_values
+           payoff[itm] = np.where(early_exercise, exercise_value[itm], discounted_cashflows[itm])
+       else:
+           payoff *= np.exp(-r * dt)
+
+
+   # Final discounted option value
+   option_value = np.mean(payoff)
+   return option_value, F
+
+
+
+
+# Run the pricing
+call_value, _ = american_option_on_futures_LSM(F0, K, r, sigma, T, M, N, 'call')
+put_value, _  = american_option_on_futures_LSM(F0, K, r, sigma, T, M, N, 'put')
+
+
+print(f"American Call Option on Futures (LSM): {round(call_value, 4)}")
+print(f"American Put Option on Futures  (LSM): {round(put_value, 4)}")
