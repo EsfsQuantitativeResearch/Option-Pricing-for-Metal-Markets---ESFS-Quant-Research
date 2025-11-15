@@ -1,0 +1,132 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+import matplotlib.cm as cm
+
+
+
+
+# Define parameters
+F0 = 2855.5          # initial futures price
+r = 0.038            # risk-free rate (3 month US treasury Bonds)
+sigma = 0.1763       # implied volatility of futures
+T = 0.1123           # time to maturity (years)
+K = 2950             # strike price
+N = 1000             # number of simulation paths
+M = 500              # number of time steps
+dt = T / M           # time step size
+
+
+#  Schwartz 1-Factor Futures Model
+def schwartz_one_factor_futures(F0, sigma, r, T, M, N, K):
+
+
+   # Initialize arrays
+   F = np.zeros((M + 1, N))
+   F[0, :] = F0
+
+
+   # Generate Brownian motion
+   z = np.random.normal(size=(M, N))
+
+
+   # Generate futures price paths (no drift under risk-neutral measure)
+   for t in range(1, M + 1):
+       # Update future price
+       F[t, :] = F[t - 1, :] * np.exp(-0.5 * sigma**2 * dt + sigma * np.sqrt(dt) * z[t - 1, :])
+
+
+   # option payoff at maturity
+   payoff = np.maximum(F[-1, :] - K, 0)
+
+
+   # option value using the LSM method
+   for t in range(M - 1, 0, -1):
+       # computing cash flows and exercise values
+       cash_flows = np.exp(-r * dt) * payoff
+       exercise_values = np.maximum(F[t, :] - K, 0)
+
+
+       # regress ITM paths
+       itm = np.where(exercise_values > 0)[0]
+       if len(itm) > 5:
+           # polynomial basis
+           x = np.log(F[t, itm] / K)
+           X = np.column_stack((np.ones(len(itm)), x, x ** 2, x ** 3, x ** 4))
+           X_inv = np.linalg.pinv(np.dot(X.T, X))
+           beta = np.dot(X_inv, np.dot(X.T, cash_flows[itm]))
+           continuation_values = np.dot(X, beta)
+
+
+           # optimal exercise policy
+           early_exercise = exercise_values[itm] > continuation_values
+           payoff[itm] = np.where(early_exercise, exercise_values[itm], cash_flows[itm])
+
+
+       # discount to previous step
+       payoff *= np.exp(-r * dt)
+
+
+   # calculate the option value using Monte Carlo simulation
+   option_value = np.mean(payoff)
+   return option_value, F
+
+
+# value the American-style option using the Schwartz 1-Factor Futures Model
+option_value, F = schwartz_one_factor_futures(F0, sigma, r, T, M, N, K)
+print("Option value (American Call on Futures, Schwartz 1-Factor):", round(option_value, 4))
+
+
+# 3D plot
+fig = plt.figure(figsize=(10, 7))
+fig.patch.set_facecolor('#0e1117') 
+
+
+ax = fig.add_subplot(111, projection="3d")
+ax.set_facecolor('#111111')        
+
+
+#  plot simulated paths
+for i in range(10):
+   ax.plot(
+       np.arange(M + 1),
+       np.full(M + 1, i),
+       F[:, i],
+       color=cm.inferno(i / 10),  
+       linewidth=1.8,
+       alpha=0.9
+   )
+
+
+# Rotate Plot
+ax.view_init(elev=15, azim=80)
+
+
+# Labels
+ax.set_title("Schwartz 1-Factor Model Paths (Futures)", color='white', pad=20)
+ax.set_xlabel("Time", color='white', labelpad=10)
+ax.set_ylabel("Path Index", color='white', labelpad=10)
+ax.set_zlabel("Futures Price", color='white', labelpad=10)
+ax.tick_params(colors='white')
+
+
+# Grid color
+ax.xaxis._axinfo["grid"].update(color="#444444")
+ax.yaxis._axinfo["grid"].update(color="#444444")
+ax.zaxis._axinfo["grid"].update(color="#444444")
+
+
+plt.show()
+
+
+# Print information about the simulation
+print("Parameters:")
+print("F0 = ", F0)
+print("r = ", r)
+print("T = ", T)
+print("sigma = ", sigma)
+print("K = ", K)
+print("N = ", N)
+print("M = ", M)
+print("dt = ", dt)
+print("Option value = ", round(option_value, 4))
