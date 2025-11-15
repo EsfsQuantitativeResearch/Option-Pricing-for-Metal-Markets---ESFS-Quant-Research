@@ -1,0 +1,96 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib import cm
+from scipy.stats import norm
+
+
+plt.close('all')
+
+
+# Interactive plots
+%matplotlib widget
+
+
+# Parameters
+T = 0.1123      # Maturity (≈ 41 days)
+K = 2950         # Strike
+r = 0.038       # Risk-free rate
+q = 0           # Dividend yield
+sigma = 0.1763  # Volatility
+
+
+# Grid for futures prices and time
+F = np.arange(2850, 2970, 5)
+t = np.linspace(0, T, 30)
+F, t = np.meshgrid(F, t)
+
+
+# Black-Scholes d1 and d2
+with np.errstate(divide='ignore', invalid='ignore'):
+   tau = T - t
+   d1 = (np.log(F / K) + (r - q + 0.5 * sigma**2) * tau) / (sigma * np.sqrt(tau))
+   d2 = d1 - sigma * np.sqrt(tau)
+
+
+# Option values
+V_Call = F * np.exp(-q * tau) * norm.cdf(d1) - K * np.exp(-r * tau) * norm.cdf(d2)
+V_Put = K * np.exp(-r * tau) * norm.cdf(-d2) - F * np.exp(-q * tau) * norm.cdf(-d1)
+
+
+# Replace NaNs at expiry
+V_Call = np.nan_to_num(V_Call, nan=0.0)
+V_Put = np.nan_to_num(V_Put, nan=0.0)
+
+
+
+
+# Plotting
+
+
+# color limits for both surfaces
+vmin = min(V_Call.min(), V_Put.min())
+vmax = max(V_Call.max(), V_Put.max())
+
+
+# Dark styling
+fig = plt.figure(figsize=(9, 5))
+fig.patch.set_facecolor('#0e1117')   # dark background outside plot
+ax1 = fig.add_subplot(1, 1, 1, projection='3d')
+ax1.set_facecolor('#111111')         # dark inside the plot
+
+
+# Surface
+surf1 = ax1.plot_surface(F, t, V_Call, cmap=cm.inferno)
+
+
+# Rotate
+ax1.view_init(elev=30, azim=110) # elev = Vertical angle & azim = Horizontal angle
+
+
+# Labels
+ax1.set_xlabel('Underlying Price F')
+ax1.set_ylabel('Time t (years)')
+ax1.set_zlabel('Call Option Value')
+ax1.set_title('Black–Scholes Call Option Surface')
+
+
+# text color to white
+for spine in [ax1.xaxis.label, ax1.yaxis.label, ax1.zaxis.label, ax1.title]:
+   spine.set_color('white')
+
+
+ax1.tick_params(colors='white')
+
+
+# colorbar
+fig.subplots_adjust(right=0.85)
+cbar_ax = fig.add_axes([0.9, 0.31, 0.02, 0.36])
+cb = fig.colorbar(surf1, cax=cbar_ax, extend='both', label='Option Value')
+
+
+# colorbar text color
+cb.ax.yaxis.label.set_color('white')
+cb.ax.tick_params(colors='white')
+
+
+plt.show()
